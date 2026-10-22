@@ -1,22 +1,54 @@
-
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-import requests
 from PIL import Image
-from huggingface_hub import hf_hub_download
 import cv2
+import requests
+from pathlib import Path
+
+# =========================
+# PAGE CONFIGURATION
+# =========================
 
 st.set_page_config(
-    page_title="Mango Disease Detection",
+    page_title="Mango Leaf Disease Detection",
     page_icon="🥭",
-    layout="wide"
+    layout="centered"
 )
 
-st.title("🥭 Mango Plant Disease Detection")
-st.write("CNN-based mango leaf disease detection and plant-care support.")
+# =========================
+# MODEL LOADING
+# =========================
 
-CLASS_NAMES = [
+@st.cache_resource
+def load_model():
+    local_path = Path("mango_disease_model.keras")
+
+    if local_path.exists():
+        model_path = str(local_path)
+    else:
+        from huggingface_hub import hf_hub_download
+
+        model_path = hf_hub_download(
+            repo_id="disha-tadas/mango-disease-model",
+            filename="mango_disease_model.keras"
+        )
+
+    return tf.keras.models.load_model(model_path)
+
+
+try:
+    model = load_model()
+except Exception as error:
+    st.error("Unable to load the mango disease model.")
+    st.code(str(error))
+    st.stop()
+
+# =========================
+# DISEASE CLASSES
+# =========================
+
+class_names = [
     "Anthracnose",
     "Bacterial Canker",
     "Cutting Weevil",
@@ -27,288 +59,513 @@ CLASS_NAMES = [
     "Sooty Mould"
 ]
 
-ADVICE = {
-    "Anthracnose": (
-        "Remove badly infected fallen leaves. Keep foliage dry and ask an "
-        "agricultural expert about locally approved fungicide options."
-    ),
-    "Bacterial Canker": (
-        "Prune affected parts with sanitized tools when appropriate. Avoid "
-        "moving contaminated plant material and consult an agricultural expert."
-    ),
-    "Cutting Weevil": (
-        "Inspect shoots for cutting or damage. Remove heavily damaged material "
-        "where appropriate and seek local pest-management advice."
-    ),
-    "Die Back": (
-        "Prune dead branches with sanitized tools and investigate possible "
-        "pests, disease, water stress, or root problems."
-    ),
-    "Gall Midge": (
-        "Inspect affected leaves and shoots. Remove badly affected material "
-        "where appropriate and seek local pest-management advice."
-    ),
-    "Healthy": (
-        "The model predicts a healthy leaf. Continue regular watering, "
-        "monitoring, and balanced plant care."
-    ),
-    "Powdery Mildew": (
-        "Improve airflow and avoid excessive leaf wetness. Ask an agricultural "
-        "expert about locally approved disease-control options."
-    ),
-    "Sooty Mould": (
-        "Inspect for sap-feeding insects such as scale insects or aphids. "
-        "Address the underlying pest problem using locally appropriate advice."
-    )
+# =========================
+# DISEASE INFORMATION
+# =========================
+
+disease_info = {
+    "Anthracnose": {
+        "severity": "High",
+        "cause": "Fungal infection caused by Colletotrichum species.",
+        "treatment": "Remove infected plant material and confirm the disease before choosing a fungicide.",
+        "prevention": "Maintain airflow, avoid excess leaf moisture and remove fallen infected leaves.",
+        "fertilizer": "Maintain balanced plant nutrition based on soil requirements."
+    },
+    "Bacterial Canker": {
+        "severity": "High",
+        "cause": "Bacterial infection that may cause lesions and cankers.",
+        "treatment": "Remove severely affected parts where appropriate and seek agricultural advice.",
+        "prevention": "Use healthy planting material and sanitize pruning tools.",
+        "fertilizer": "Use balanced nutrients based on soil testing."
+    },
+    "Cutting Weevil": {
+        "severity": "Medium",
+        "cause": "Plant damage associated with cutting weevil infestation.",
+        "treatment": "Confirm the pest and seek advice about suitable registered pest-control options.",
+        "prevention": "Inspect new shoots regularly and remove badly damaged material.",
+        "fertilizer": "Maintain balanced plant nutrition."
+    },
+    "Die Back": {
+        "severity": "High",
+        "cause": "Drying and death of shoots or branches.",
+        "treatment": "Prune dead branches using sanitized tools and confirm the cause of the damage.",
+        "prevention": "Maintain orchard hygiene and avoid plant stress.",
+        "fertilizer": "Use fertilizer according to soil-test recommendations."
+    },
+    "Gall Midge": {
+        "severity": "Medium",
+        "cause": "Insect infestation that can damage young leaves and shoots.",
+        "treatment": "Confirm the insect before selecting a registered treatment.",
+        "prevention": "Monitor young leaves and shoots regularly.",
+        "fertilizer": "Maintain balanced nutrients for healthy growth."
+    },
+    "Healthy": {
+        "severity": "None detected",
+        "cause": "The model classified the leaf as healthy.",
+        "treatment": "No disease treatment is indicated by this prediction.",
+        "prevention": "Continue routine monitoring, proper watering and plant hygiene.",
+        "fertilizer": "Apply balanced fertilizer according to soil requirements."
+    },
+    "Powdery Mildew": {
+        "severity": "High",
+        "cause": "Fungal infection that produces white, powder-like growth.",
+        "treatment": "Confirm the disease and consult an agricultural expert about a suitable registered fungicide.",
+        "prevention": "Maintain airflow and monitor plants regularly.",
+        "fertilizer": "Avoid excessive nitrogen and maintain balanced nutrition."
+    },
+    "Sooty Mould": {
+        "severity": "Medium",
+        "cause": "Dark fungal growth often associated with honeydew-producing insects.",
+        "treatment": "Identify and manage the insects responsible for the honeydew.",
+        "prevention": "Monitor for scale insects, aphids and other sap-feeding pests.",
+        "fertilizer": "Maintain balanced nutrition according to soil requirements."
+    }
 }
 
-@st.cache_resource
-def load_model():
-    model_path = hf_hub_download(
-        repo_id="disha-tadas/mango-disease-model",
-        filename="mango_disease_model.keras"
+# =========================
+# MEDICINE / PESTICIDE
+# RECOMMENDATIONS
+# =========================
+
+medicine_info = {
+    "Anthracnose": [
+        "Copper-based fungicides may be an option if registered for mango anthracnose in your area.",
+        "Ask an agricultural officer to confirm the diagnosis and treatment."
+    ],
+    "Bacterial Canker": [
+        "Confirm the bacterial disease before treatment.",
+        "Ask an agricultural officer about locally recommended management options."
+    ],
+    "Cutting Weevil": [
+        "Confirm the pest before choosing an insecticide.",
+        "Use only a product registered for mango and the identified pest."
+    ],
+    "Die Back": [
+        "Prune dead branches using sanitized tools.",
+        "Use a fungicide only if the cause is confirmed and the product is registered for that use."
+    ],
+    "Gall Midge": [
+        "Confirm the infestation before selecting an insect-control product.",
+        "Ask an agricultural officer for a locally registered treatment."
+    ],
+    "Healthy": [
+        "No pesticide is recommended based on a healthy classification."
+    ],
+    "Powdery Mildew": [
+        "Wettable sulphur may be an option if registered for mango powdery mildew in your area.",
+        "Follow the product label and seek agricultural advice."
+    ],
+    "Sooty Mould": [
+        "Identify and manage the insects producing honeydew.",
+        "Ask an agricultural officer to recommend a suitable registered pest-control product."
+    ]
+}
+
+# =========================
+# CNN PREDICTION
+# =========================
+
+def predict_disease(image):
+    resized = image.resize((224, 224))
+
+    image_array = np.array(
+        resized,
+        dtype=np.float32
     )
-    return tf.keras.models.load_model(model_path)
 
-@st.cache_data(ttl=1800)
-def get_weather(place):
-    # Geocode the place name using Open-Meteo.
-    geo_url = "https://geocoding-api.open-meteo.com/v1/search"
-    geo_response = requests.get(
-        geo_url,
-        params={"name": place, "count": 1, "language": "en", "format": "json"},
-        timeout=15
+    image_array = np.expand_dims(
+        image_array,
+        axis=0
     )
-    geo_response.raise_for_status()
-    geo_results = geo_response.json().get("results", [])
 
-    if not geo_results:
-        return None
-
-    location = geo_results[0]
-    lat = location["latitude"]
-    lon = location["longitude"]
-
-    weather_response = requests.get(
-        "https://api.open-meteo.com/v1/forecast",
-        params={
-            "latitude": lat,
-            "longitude": lon,
-            "current": "temperature_2m,relative_humidity_2m,"
-                       "precipitation,weather_code,wind_speed_10m",
-            "timezone": "auto"
-        },
-        timeout=15
+    predictions = model.predict(
+        image_array,
+        verbose=0
     )
-    weather_response.raise_for_status()
 
-    return location, weather_response.json().get("current", {})
+    index = int(np.argmax(predictions[0]))
+    confidence = float(predictions[0][index]) * 100
 
-def weather_description(code):
-    if code == 0:
-        return "Clear sky"
-    if code in (1, 2, 3):
-        return "Mainly clear to cloudy"
-    if code in (45, 48):
-        return "Fog"
-    if code in (51, 53, 55, 56, 57):
-        return "Drizzle"
-    if code in (61, 63, 65, 66, 67):
-        return "Rain"
-    if code in (71, 73, 75, 77):
-        return "Snow"
-    if code in (80, 81, 82):
-        return "Rain showers"
-    if code in (95, 96, 99):
-        return "Thunderstorm"
-    return "Conditions unavailable"
+    return class_names[index], confidence
 
-def estimate_leaf_areas(pil_image):
-    """
-    Rough visual estimate only. This is not a trained lesion-segmentation model.
-    It can mistake shadows, veins, background, or natural colour changes for disease.
-    """
-    rgb = np.array(pil_image.convert("RGB"))
-    h, w = rgb.shape[:2]
+# =========================
+# OPENCV SPOT HIGHLIGHTING
+# =========================
 
-    # Resize for faster processing while preserving the original image for display.
-    scale = min(1.0, 700 / max(h, w))
-    if scale < 1.0:
-        rgb = cv2.resize(
-            rgb, (int(w * scale), int(h * scale)),
-            interpolation=cv2.INTER_AREA
+def highlight_spots(image):
+    rgb = np.array(image.convert("RGB"))
+
+    bgr = cv2.cvtColor(
+        rgb,
+        cv2.COLOR_RGB2BGR
+    )
+
+    hsv = cv2.cvtColor(
+        bgr,
+        cv2.COLOR_BGR2HSV
+    )
+
+    gray = cv2.cvtColor(
+        bgr,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    blurred = cv2.GaussianBlur(
+        gray,
+        (21, 21),
+        0
+    )
+
+    difference = (
+        blurred.astype(np.int16)
+        - gray.astype(np.int16)
+    )
+
+    saturation = hsv[:, :, 1]
+
+    leaf_mask = (
+        (saturation > 25) &
+        (gray < 240)
+    ).astype(np.uint8) * 255
+
+    spots = (
+        (difference > 12) &
+        (gray < 180) &
+        (leaf_mask > 0)
+    ).astype(np.uint8) * 255
+
+    kernel = np.ones(
+        (3, 3),
+        np.uint8
+    )
+
+    spots = cv2.morphologyEx(
+        spots,
+        cv2.MORPH_OPEN,
+        kernel
+    )
+
+    spots = cv2.morphologyEx(
+        spots,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
+
+    contours, _ = cv2.findContours(
+        spots,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    result = rgb.copy()
+    spot_count = 0
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+
+        if 15 <= area <= 800:
+            cv2.drawContours(
+                result,
+                [contour],
+                -1,
+                (255, 0, 0),
+                2
+            )
+
+            spot_count += 1
+
+    return Image.fromarray(result), spot_count
+
+# =========================
+# WEATHER FUNCTION
+# =========================
+
+def get_weather(city):
+    try:
+        geo_response = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={
+                "name": city,
+                "count": 1,
+                "language": "en",
+                "format": "json"
+            },
+            timeout=10
         )
 
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    # Broad green/yellow/brown colour range to estimate likely leaf pixels.
-    leaf_mask = (
-        (hsv[:, :, 0] >= 15) &
-        (hsv[:, :, 0] <= 100) &
-        (hsv[:, :, 1] >= 25) &
-        (hsv[:, :, 2] >= 25)
-    )
+        geo_response.raise_for_status()
+        locations = geo_response.json().get("results", [])
 
-    leaf_count = int(np.count_nonzero(leaf_mask))
-    if leaf_count < 100:
-        return None, None
+        if not locations:
+            return None
 
-    # Mark dark brown, reddish, and pale discoloured pixels within likely leaf.
-    r = rgb[:, :, 0].astype(np.int16)
-    g = rgb[:, :, 1].astype(np.int16)
-    b = rgb[:, :, 2].astype(np.int16)
-    saturation = hsv[:, :, 1]
-    value = hsv[:, :, 2]
+        location = locations[0]
 
-    brown_or_dark = (
-        (r > g * 0.85) &
-        (r > b * 0.8) &
-        ((r - g) > 8) &
-        (value < 190)
-    )
-    pale_discolouration = (saturation < 65) & (value > 100)
-    candidate = leaf_mask & (brown_or_dark | pale_discolouration)
+        weather_response = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": location["latitude"],
+                "longitude": location["longitude"],
+                "current": (
+                    "temperature_2m,"
+                    "relative_humidity_2m,"
+                    "precipitation"
+                ),
+                "timezone": "auto"
+            },
+            timeout=10
+        )
 
-    # Reduce isolated noise.
-    candidate_u8 = (candidate.astype(np.uint8) * 255)
-    candidate_u8 = cv2.medianBlur(candidate_u8, 5)
-    candidate = candidate_u8 > 0
+        weather_response.raise_for_status()
 
-    affected_count = int(np.count_nonzero(candidate & leaf_mask))
-    affected_percent = min(100.0, affected_count / leaf_count * 100.0)
+        current = weather_response.json().get("current")
 
-    # Make a visual overlay of candidate discoloured areas.
-    overlay = rgb.copy()
-    overlay[candidate & leaf_mask] = [255, 0, 0]
-    highlighted = Image.fromarray(overlay)
+        if not current:
+            return None
 
-    return affected_percent, highlighted
+        return {
+            "place": location.get("name", city),
+            "temperature": current.get("temperature_2m"),
+            "humidity": current.get("relative_humidity_2m"),
+            "rain": current.get("precipitation")
+        }
 
-# Weather section
-st.subheader("🌦️ Current Weather")
-place = st.text_input("Enter your city or town", value="Bengaluru")
+    except (requests.RequestException, ValueError, KeyError):
+        return None
 
-if st.button("Get Current Weather"):
-    try:
-        with st.spinner("Getting current weather..."):
-            result = get_weather(place.strip())
+# =========================
+# APP INTERFACE
+# =========================
 
-        if result is None:
-            st.warning("Location not found. Try a different city or town name.")
-        else:
-            location, current = result
-            st.write(
-                f"**Location:** {location['name']}, "
-                f"{location.get('country', '')}"
-            )
-            if current:
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Temperature", f"{current.get('temperature_2m', '—')} °C")
-                c2.metric("Humidity", f"{current.get('relative_humidity_2m', '—')}%")
-                c3.metric("Wind speed", f"{current.get('wind_speed_10m', '—')} km/h")
-                st.write(
-                    "Conditions:",
-                    weather_description(current.get("weather_code", -1))
-                )
-                st.caption(
-                    "Weather data: Open-Meteo. Weather is general local context, "
-                    "not a diagnosis of plant disease."
-                )
-            else:
-                st.warning("Weather data is currently unavailable.")
-    except Exception as error:
-        st.warning(f"Could not retrieve weather: {error}")
+st.title("🥭 Mango Leaf Disease Detection")
 
-st.divider()
-st.subheader("🔬 Leaf Disease Analysis")
+st.write(
+    "Upload a mango leaf image to detect its disease, "
+    "view treatment and fertilizer suggestions, highlight "
+    "possible affected spots, and check local weather."
+)
+
+st.info(
+    "AI predictions are estimates. Confirm the disease "
+    "before applying any pesticide or treatment."
+)
+
+# =========================
+# IMAGE UPLOAD
+# =========================
 
 uploaded_file = st.file_uploader(
-    "Upload a clear mango leaf photo",
+    "📷 Choose a mango leaf image",
     type=["jpg", "jpeg", "png"]
 )
 
-if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded mango leaf", use_container_width=True)
+if uploaded_file is not None:
+    try:
+        image = Image.open(uploaded_file).convert("RGB")
 
-    if st.button("Detect Disease", type="primary"):
-        try:
-            with st.spinner("Analyzing leaf with CNN..."):
-                model = load_model()
+        st.image(
+            image,
+            caption="Uploaded Mango Leaf",
+            use_container_width=True
+        )
 
-                # Use the model's expected input dimensions.
-                shape = model.input_shape
-                height = shape[1] or 224
-                width = shape[2] or 224
+        if st.button("🔍 Detect Disease", type="primary"):
+            with st.spinner("Analysing the mango leaf..."):
+                predicted_class, confidence = predict_disease(image)
 
-                resized = image.resize((width, height))
-                array = np.asarray(resized, dtype=np.float32)
+                highlighted_image, spot_count = highlight_spots(image)
 
-                # Preserve the raw-RGB preprocessing that worked in your latest test.
-                array = np.expand_dims(array, axis=0)
-                output = np.asarray(
-                    model.predict(array, verbose=0)[0]
-                ).flatten()
+            st.session_state["result"] = {
+                "disease": predicted_class,
+                "confidence": confidence,
+                "image": image,
+                "highlighted": highlighted_image,
+                "spot_count": spot_count
+            }
 
-                if len(output) != len(CLASS_NAMES):
-                    st.error(
-                        f"Expected 8 class outputs, received {len(output)}."
-                    )
-                    st.stop()
+    except Exception as error:
+        st.error("Unable to process this image.")
+        st.code(str(error))
 
-                index = int(np.argmax(output))
-                disease = CLASS_NAMES[index]
-                score = float(output[index])
+# =========================
+# DISPLAY RESULTS
+# =========================
 
-                st.subheader("Detection Result")
-                st.success(f"Predicted disease: {disease}")
-                st.metric("Model score", f"{score * 100:.2f}%")
-                st.write("### Prevention and care")
-                st.write(ADVICE[disease])
+if "result" in st.session_state:
+    result = st.session_state["result"]
 
-                affected_percent, highlighted = estimate_leaf_areas(image)
+    predicted_class = result["disease"]
+    confidence = result["confidence"]
+    info = disease_info[predicted_class]
 
-                st.write("### Severity estimate")
-                if disease == "Healthy":
-                    st.info(
-                        "The model predicts a healthy leaf. The visual colour "
-                        "estimate is not a disease-severity measurement."
-                    )
-                elif affected_percent is None:
-                    st.warning(
-                        "Could not estimate discoloured leaf area from this image. "
-                        "Try a clear photo with the leaf filling most of the frame."
-                    )
-                else:
-                    st.metric(
-                        "Estimated discoloured area of likely leaf pixels",
-                        f"{affected_percent:.1f}%"
-                    )
-                    if affected_percent < 5:
-                        st.write("Visual estimate: low discolouration")
-                    elif affected_percent < 20:
-                        st.write("Visual estimate: moderate discolouration")
-                    else:
-                        st.write("Visual estimate: high discolouration")
+    st.divider()
+    st.header("🌿 Detection Result")
 
-                    st.caption(
-                        "This is a rough colour-based estimate, not a validated "
-                        "measurement of infected tissue or disease severity."
-                    )
+    st.success(f"Predicted Disease: {predicted_class}")
 
-                if highlighted is not None:
-                    st.write("### Highlighted leaf areas")
-                    st.image(
-                        highlighted,
-                        caption=(
-                            "Red marks show candidate discoloured areas, "
-                            "not confirmed disease lesions."
-                        ),
-                        use_container_width=True
-                    )
+    st.metric(
+        "Model Confidence",
+        f"{confidence:.2f}%"
+    )
 
-                with st.expander("Scores for all classes"):
-                    for name, value in zip(CLASS_NAMES, output):
-                        st.write(f"**{name}:** {float(value) * 100:.2f}%")
+    if confidence < 60:
+        st.warning(
+            "The confidence is relatively low. Try a clearer image "
+            "with good lighting and a visible leaf."
+        )
 
-        except Exception as error:
-            st.error(f"Prediction failed: {error}")
+    # Disease details
+    st.header("🩺 Disease Information")
+
+    st.write(f"**Severity:** {info['severity']}")
+    st.write(f"**Cause:** {info['cause']}")
+    st.write(f"**Treatment:** {info['treatment']}")
+    st.write(f"**Prevention:** {info['prevention']}")
+
+    # Medicine recommendations
+    st.header("💊 Medicine / Pesticide Recommendations")
+
+    for medicine in medicine_info[predicted_class]:
+        st.write(f"• {medicine}")
+
+    st.caption(
+        "General guidance only. Confirm the diagnosis and use only "
+        "products registered for mango and the identified disease or pest. "
+        "Follow the product label, protective-equipment instructions "
+        "and pre-harvest interval."
+    )
+
+    # Fertilizer
+    st.header("🌱 Fertilizer Recommendation")
+
+    st.write(info["fertilizer"])
+
+    st.caption(
+        "Actual fertilizer application should follow soil testing "
+        "and local agricultural guidance."
+    )
+
+    # Highlighting
+    st.header("🔴 Possible Affected Spots")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.image(
+            result["image"],
+            caption="Original Leaf",
+            use_container_width=True
+        )
+
+    with col2:
+        st.image(
+            result["highlighted"],
+            caption="Possible Spots Highlighted",
+            use_container_width=True
+        )
+
+    st.write(
+        f"**Possible regions highlighted:** {result['spot_count']}"
+    )
+
+    st.caption(
+        "OpenCV highlights image regions based on image processing. "
+        "These regions are not confirmed disease spots or a validated "
+        "measurement of disease severity."
+    )
+
+    if predicted_class == "Healthy":
+        st.success(
+            "The model classified this leaf as healthy. "
+            "Continue routine monitoring."
+        )
+    else:
+        st.warning(
+            "Inspect the plant and confirm the diagnosis before treatment."
+        )
+
+# =========================
+# WEATHER SECTION
+# =========================
+
+st.divider()
+st.header("🌦️ Weather Information")
+
+city = st.text_input(
+    "Enter your city",
+    value="Bengaluru"
+)
+
+if st.button("Check Weather"):
+    if not city.strip():
+        st.warning("Please enter a city name.")
+    else:
+        with st.spinner("Fetching weather information..."):
+            weather = get_weather(city.strip())
+
+        if weather:
+            st.subheader(f"Weather for {weather['place']}")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "Temperature",
+                    f"{weather['temperature']} °C"
+                    if weather["temperature"] is not None
+                    else "Unavailable"
+                )
+
+            with col2:
+                st.metric(
+                    "Humidity",
+                    f"{weather['humidity']}%"
+                    if weather["humidity"] is not None
+                    else "Unavailable"
+                )
+
+            with col3:
+                st.metric(
+                    "Precipitation",
+                    f"{weather['rain']} mm"
+                    if weather["rain"] is not None
+                    else "Unavailable"
+                )
+
+            humidity = weather["humidity"]
+            rain = weather["rain"]
+
+            if humidity is not None and humidity >= 80:
+                st.warning(
+                    "Humidity is high. Monitor for fungal diseases "
+                    "and maintain good airflow."
+                )
+            elif rain is not None and rain > 0:
+                st.info(
+                    "Precipitation is present. Avoid unnecessary "
+                    "leaf wetting and monitor the plant."
+                )
+            else:
+                st.success(
+                    "Continue routine plant monitoring and care."
+                )
+
+            st.caption(
+                "Weather data provided by Open-Meteo."
+            )
+
+        else:
+            st.error(
+                "Unable to retrieve weather. Check the city name "
+                "and internet connection."
+            )
+
+# =========================
+# FOOTER
+# =========================
+
+st.divider()
+
+st.caption(
+    "Mango Leaf Disease Detection using CNN | Major Project"
+)
